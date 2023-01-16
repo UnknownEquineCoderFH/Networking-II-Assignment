@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+
 from enum import IntFlag, auto
 from dataclasses import dataclass
 
@@ -16,6 +18,9 @@ class BytesConvertible(Protocol):
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
         ...
+
+
+B = TypeVar("B", bound=BytesConvertible)
 
 
 def parse_into(
@@ -37,7 +42,7 @@ class Type(IntFlag):
 
 
 class Operation(IntFlag):
-    ERR = 0x0
+    ERR = 0x1
     SYN = 0x2
     ACK = 0x4
     FIN = 0x8
@@ -105,3 +110,66 @@ class Message:
         _header = Header.from_bytes(data[:39])
         _data = data[39:].decode()
         return cls(_header, _data)
+
+    @classmethod
+    def chat(cls, content: str, user: str, *, resend: bool = False) -> Message:
+        # pad and crop the user str to be exactly 32 bytes
+        user = user.ljust(32, "\0")[:32]
+
+        _header = Header(
+            Type.CHAT,
+            Operation.ERR,
+            Sequence.RE if resend else Sequence.NORE,
+            user,
+            len(content),
+        )
+
+        return cls(_header, content)
+    
+    @classmethod
+    def control(cls, user: str, operation: Operation, *, resend: bool = False, message: str = "") -> Message:
+        # pad and crop the user str to be exactly 32 bytes
+        user = user.ljust(32, "\0")[:32]
+
+        if operation != Operation.ERR and message:
+            raise ValueError("[SIMP ERROR]: Message can only be set for ERR operations!")
+
+        _header = Header(
+            Type.CONTROL,
+            operation,
+            Sequence.RE if resend else Sequence.NORE,
+            user,
+            len(message),
+        )
+
+        return cls(_header, message)
+
+
+@dataclass
+class User:
+    name: str
+    host: str = "localhost"
+    port: int = 5000
+
+    def connect(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            print(f"Connecting to {self.host}:{self.port}")
+
+            while (content := input(f"[{self.name}]: ")) != "quit":
+                coded_message = Message.chat(content, self.name)
+
+                client.sendto(coded_message.into_bytes(), (self.host, self.port))
+
+                response, address = client.recvfrom(4096)
+
+                print(f"Received {len(response)} bytes from {address}")
+
+                print(f"Message: {response.decode()}")
+
+        return 0
+    
+    def establish_handshake(self):
+        # TODO!
+        ...
+
+

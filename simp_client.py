@@ -1,29 +1,14 @@
 from __future__ import annotations
 
-import socket
 from argparse import ArgumentParser
 
 from simp import *
 
 
-def send_message(host: str, port: int, message: str) -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
-        # Send data
-        print(f"Sending data to {host}:{port}")
+def main(username: str, host: str, port: int) -> int:
+    user = User(username, host, port)
 
-        client.sendto(message.encode(), (host, port))
-
-        # Receive response
-        data, address = client.recvfrom(4096)
-        print(f"Received {len(data)} bytes from {address}")
-
-    return 0
-
-
-def main(host: str, port: int) -> int:
-    while True:
-        message = input(">>> ")
-        send_message(host, port, message)
+    user.connect()
 
     return 0
 
@@ -35,8 +20,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    username = input("Enter your username: ")
+
     try:
-        raise SystemExit(main(args.host, args.port))
+        raise SystemExit(main(username, args.host, args.port))
     except KeyboardInterrupt:
         print("Logging out...")
         raise SystemExit(0)
