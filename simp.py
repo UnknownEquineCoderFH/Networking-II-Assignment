@@ -221,3 +221,38 @@ class User:
     def establish_handshake(self):
         # TODO!
         ...
+
+
+    def stop_and_wait(self,data:bytes,window_size:int=1):
+       with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as client :
+            client.send(data[:window_size])
+            while True:
+                response = client.recv(4096).decode()
+                if response and response == "ACK":
+                    data = data[window_size:]
+                    if not data:
+                        break
+                    client.send(data[:window_size])
+                else:
+                    break
+
+
+        
+    def sliding_window(self,data:bytes,window_size:int=1):
+        with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as client :
+            client.send(data[:window_size])
+            while True:
+                for packet in data[:window_size]:
+                    client.send(packet)
+                acks = 0
+                while acks < window_size:
+                    response = client.recv(4096).decode()
+                    if response and response == "ACK":
+                        acks += 1
+                    else:
+                        break
+                if acks == window_size:
+                    data = data[window_size:]
+                    if not data:
+                        break
+                
