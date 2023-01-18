@@ -20,7 +20,7 @@ class Chat:
         self.connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.connection.bind((self.host, self.port))
         return self
-    
+
     def __exit__(self, exc_type, exc_value, traceback):
         self.connection.close()
 
@@ -30,6 +30,10 @@ class Server:
     users: list[User] = field(default_factory=list)
     host: str = "localhost"
     port: int = 5000
+
+    @property
+    def usernames(self) -> str:
+        return "\n".join(f"{i + 1}) {user.name}" for i, user in enumerate(self.users))
 
     def run(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
@@ -42,21 +46,53 @@ class Server:
 
                 decoded_message = Message.from_bytes(data)
 
-                print(f"Received {len(data)} bytes from {address}")
-                print(f"Message: {decoded_message}")
+                username = decoded_message.header.user
+                user = User(username, address[0], address[1])
 
-                match decoded_message.data:
-                    case "commands":
-                        server.sendto("Commands: users, <username>".encode(), address)
-                    case "users":
-                        server.sendto(f"Users: {self.users}".encode(), address)
-                    case username if username.isdecimal():
-                        server.sendto(f"Connecting with user {username}".encode(), address)
-                    case _:
-                        server.sendto("Invalid command".encode(), address)
+                response = self.handle_message(user, decoded_message)
+
+                server.sendto(response.encode(), address)
 
         return 0
 
+    def handle_message(self, user: User, message: Message) -> str:
+        self.add_user(user)
+        match message.type:
+            case Type.CHAT:
+                command, *args = message.data.strip().split(" ")
+                return self.handle_command(user, command, *args)
+            case Type.CONTROL:
+                return self.handle_control(user, message.operation)
+
+    def add_user(self, user: User) -> None:
+        if not any(user == u for u in self.users):
+            self.users.append(user)
+
+    def handle_command(self, user: User, command: str, *args: str) -> str:
+        match Command.try_from(command):
+            case Command.HELP:
+                return "Commands: help, list, chat <user>"
+            case Command.LIST:
+                return f"Users:\n{self.usernames}"
+            case Command.CHAT if len(args) == 1:
+                selected_user = self.users[int(args[0]) - 1]
+
+                if user == selected_user:
+                    return "You cannot chat with yourself"
+
+                return f"Connecting with user {selected_user.name}"
+                # TODO: CREATE A CHAT
+
+            case _:
+                return f"Unknown command, try running `help` for more information"
+
+    def handle_control(self, user: User, operation: Operation) -> str:
+        match operation:
+            case Operation.FIN:
+                self.users.remove(user)
+                return f"User {user.name} has disconnected"
+            case op:
+                return f"Invalid command, {op}"
 
     def chat(self, users: tuple[User, User], port: int) -> Chat:
         # Remove the users from the waiting list
@@ -64,11 +100,6 @@ class Server:
             self.users.remove(user)
 
         return Chat(users, host=self.host, port=port)
-    
-    def join(self, user: User) -> Server:
-        # TODO!
-        self.users.append(user)
-        return self
 
 
 def main(host: str, port: int) -> int:

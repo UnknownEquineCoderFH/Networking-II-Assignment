@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import socket
 
-from enum import IntFlag, auto
+from enum import IntFlag, StrEnum, auto
 from dataclasses import dataclass
 
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, Generic, Type as T
 
 
 Self = TypeVar("Self")
@@ -23,10 +23,9 @@ class BytesConvertible(Protocol):
 B = TypeVar("B", bound=BytesConvertible)
 
 
-def parse_into(
-    data: bytes, length: int, cls: type[BytesConvertible]
-) -> tuple[bytes, BytesConvertible]:
-    return data[length:], cls.from_bytes(data[:length])
+class parse(Generic[B]):
+    def __new__(cls, data: bytes, length: int, t: T[B], /) -> tuple[bytes, B]:
+        return data[length:], t.from_bytes(data[:length])
 
 
 class Type(IntFlag):
@@ -70,6 +69,29 @@ class Sequence(IntFlag):
         return cls(int.from_bytes(data, "big"))
 
 
+class Command(StrEnum):
+    HELP = auto()
+    LIST = auto()
+    CHAT = auto()
+
+    @property
+    def arg_num(self) -> int:
+        match self:
+            case Command.HELP:
+                return 0
+            case Command.LIST:
+                return 0
+            case Command.CHAT:
+                return 1
+
+    @classmethod
+    def try_from(cls, command: str) -> Command | None:
+        try:
+            return cls(command)
+        except ValueError:
+            return None
+
+
 @dataclass
 class Header:
     type: Type
@@ -89,9 +111,9 @@ class Header:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Header:
-        data, _type = parse_into(data, 1, Type)
-        data, _operation = parse_into(data, 1, Operation)
-        data, _sequence = parse_into(data, 1, Sequence)
+        data, _type = parse[Type](data, 1, Type)
+        data, _operation = parse[Operation](data, 1, Operation)
+        data, _sequence = parse[Sequence](data, 1, Sequence)
         _user, data = data[:32].decode(), data[32:]
         _length = int.from_bytes(data[:4], "big")
         return cls(_type, _operation, _sequence, _user, _length)
@@ -101,6 +123,22 @@ class Header:
 class Message:
     header: Header
     data: str
+
+    @property
+    def is_control(self) -> bool:
+        return self.header.type == Type.CONTROL
+
+    @property
+    def is_chat(self) -> bool:
+        return self.header.type == Type.CHAT
+
+    @property
+    def operation(self) -> Operation:
+        return self.header.operation
+
+    @property
+    def type(self) -> Type:
+        return self.header.type
 
     def into_bytes(self) -> bytes:
         return self.header.into_bytes() + self.data.encode()
@@ -125,14 +163,18 @@ class Message:
         )
 
         return cls(_header, content)
-    
+
     @classmethod
-    def control(cls, user: str, operation: Operation, *, resend: bool = False, message: str = "") -> Message:
+    def control(
+        cls, user: str, operation: Operation, *, resend: bool = False, message: str = ""
+    ) -> Message:
         # pad and crop the user str to be exactly 32 bytes
         user = user.ljust(32, "\0")[:32]
 
         if operation != Operation.ERR and message:
-            raise ValueError("[SIMP ERROR]: Message can only be set for ERR operations!")
+            raise ValueError(
+                "[SIMP ERROR]: Message can only be set for ERR operations!"
+            )
 
         _header = Header(
             Type.CONTROL,
@@ -164,12 +206,18 @@ class User:
 
                 print(f"Received {len(response)} bytes from {address}")
 
-                print(f"Message: {response.decode()}")
+                print(f"{response.decode()}")
+            else:
+                exit_message = Message.control(self.name, Operation.FIN)
+                client.sendto(exit_message.into_bytes(), (self.host, self.port))
 
         return 0
-    
+
+    def __eq__(self, __o: object) -> bool:
+        if isinstance(__o, User):
+            return self.name == __o.name
+        return False
+
     def establish_handshake(self):
         # TODO!
         ...
-
-
